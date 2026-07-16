@@ -109,7 +109,7 @@ func normalizeConfig(cfg config.Config) config.Config {
 	if cfg.ReplicationQueue <= 0 {
 		cfg.ReplicationQueue = 1000
 	}
-	if cfg.ReplicationRetries < 0 {
+	if cfg.ReplicationRetries <= 0 {
 		cfg.ReplicationRetries = 3
 	}
 	if cfg.HealthCheckInterval <= 0 {

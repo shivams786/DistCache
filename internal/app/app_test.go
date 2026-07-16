@@ -9,11 +9,13 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/codex/distcache/internal/cluster"
 	"github.com/codex/distcache/internal/config"
+	"github.com/codex/distcache/internal/transport"
 )
 
 type testNode struct {
@@ -106,6 +108,102 @@ func TestReadFallsBackToReplicaWhenPrimaryUnavailable(t *testing.T) {
 	}
 }
 
+func TestHealthLiveAndReadyEndpoints(t *testing.T) {
+	nodes := startTestCluster(t, 3)
+	node := nodeByID(t, nodes, "cache-node-1")
+
+	expectStatus(t, node.baseURL+"/health/live", http.StatusOK)
+	expectStatus(t, node.baseURL+"/health/ready", http.StatusOK)
+}
+
+func TestRejectsValuesOverOneMB(t *testing.T) {
+	nodes := startTestCluster(t, 3)
+	node := nodeByID(t, nodes, "cache-node-1")
+	body, err := json.Marshal(map[string]any{"value": strings.Repeat("x", 1024*1024+1)})
+	if err != nil {
+		t.Fatalf("marshal oversized payload: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPut, node.baseURL+"/cache/too-large", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("put oversized value: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		data, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 413, got %d: %s", resp.StatusCode, data)
+	}
+}
+
+func TestDefaultTTLAppliedWhenOmitted(t *testing.T) {
+	nodes := startTestCluster(t, 3)
+	owner := nodeByID(t, nodes, "cache-node-1")
+	key := keyOwnedBy(t, nodes, owner.id)
+	putValueWithoutTTL(t, owner.baseURL, key, "default-ttl")
+
+	entry, ok := owner.app.cache.Get(key)
+	if !ok {
+		t.Fatal("expected value to be stored")
+	}
+	ttl := time.Until(entry.ExpiresAt)
+	if ttl < 250*time.Second || ttl > 300*time.Second {
+		t.Fatalf("expected default ttl near 300s, got %s", ttl)
+	}
+}
+
+func TestMetricsEndpointIncludesRequiredMetrics(t *testing.T) {
+	nodes := startTestCluster(t, 3)
+	node := nodeByID(t, nodes, "cache-node-1")
+	putValue(t, node.baseURL, "metrics-key", "metrics-value", 30)
+
+	resp, err := http.Get(node.baseURL + "/metrics")
+	if err != nil {
+		t.Fatalf("get metrics: %v", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read metrics: %v", err)
+	}
+	body := string(data)
+	required := []string{
+		"distcache_requests_total",
+		"distcache_cache_hits_total",
+		"distcache_cache_misses_total",
+		"distcache_cache_entries",
+		"distcache_evictions_total",
+		"distcache_expired_entries_total",
+		"distcache_replication_success_total",
+		"distcache_replication_failures_total",
+		"distcache_failovers_total",
+		"distcache_node_health",
+		"distcache_request_duration_seconds",
+		"distcache_grpc_request_duration_seconds",
+	}
+	for _, metric := range required {
+		if !strings.Contains(body, metric) {
+			t.Fatalf("metrics output missing %s:\n%s", metric, body)
+		}
+	}
+}
+
+func TestRejectsForwardingHopOverLimit(t *testing.T) {
+	nodes := startTestCluster(t, 3)
+	node := nodeByID(t, nodes, "cache-node-1")
+	_, err := node.app.Set(context.Background(), &transport.SetRequest{
+		Key:      "too-many-hops",
+		Value:    []byte("value"),
+		HopCount: 2,
+	})
+	if err == nil {
+		t.Fatal("expected hop limit error")
+	}
+}
+
 func startTestCluster(t *testing.T, count int) []*testNode {
 	t.Helper()
 
@@ -127,12 +225,17 @@ func startTestCluster(t *testing.T, count int) []*testNode {
 			ClusterNodes:        nodes,
 			CacheMaxEntries:     128,
 			CleanupInterval:     50 * time.Millisecond,
+			DefaultTTL:          300 * time.Second,
+			MaxValueBytes:       1024 * 1024,
 			VirtualNodes:        80,
 			ReplicationFactor:   2,
-			ReplicationWorkers:  2,
-			ReplicationQueue:    32,
+			ReplicationWorkers:  8,
+			ReplicationQueue:    1000,
+			ReplicationRetries:  3,
 			HealthCheckInterval: 100 * time.Millisecond,
 			RequestTimeout:      200 * time.Millisecond,
+			HealthCheckTimeout:  75 * time.Millisecond,
+			MaxForwardingHops:   1,
 		}
 		instance, err := New(cfg, logger)
 		if err != nil {
@@ -233,12 +336,25 @@ func waitForHTTP(t *testing.T, url string) {
 	})
 }
 
+func expectStatus(t *testing.T, url string, status int) {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("get %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != status {
+		data, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected %d from %s, got %d: %s", status, url, resp.StatusCode, data)
+	}
+}
+
 func waitForClusterHealthy(t *testing.T, nodes []*testNode) {
 	t.Helper()
 	eventually(t, 3*time.Second, func() bool {
 		for _, appNode := range nodes {
 			for _, status := range appNode.app.membership.Snapshot() {
-				if !status.Healthy {
+				if !status.Healthy || status.ConsecutiveSuccess == 0 {
 					return false
 				}
 			}
@@ -262,6 +378,28 @@ func eventually(t *testing.T, timeout time.Duration, fn func() bool) {
 func putValue(t *testing.T, baseURL, key, value string, ttlSeconds int) {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{"value": value, "ttl_seconds": ttlSeconds})
+	if err != nil {
+		t.Fatalf("marshal put payload: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPut, baseURL+"/cache/"+key, bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("new put request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("put %s: %v", key, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		t.Fatalf("put status %d: %s", resp.StatusCode, data)
+	}
+}
+
+func putValueWithoutTTL(t *testing.T, baseURL, key, value string) {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"value": value})
 	if err != nil {
 		t.Fatalf("marshal put payload: %v", err)
 	}

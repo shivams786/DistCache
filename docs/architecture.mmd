@@ -1,0 +1,18 @@
+flowchart LR
+    Client["HTTP clients"] --> N1["cache-node-1\nHTTP 8081 -> 8080\ngRPC 9090"]
+    Client --> N2["cache-node-2\nHTTP 8082 -> 8080\ngRPC 9090"]
+    Client --> N3["cache-node-3\nHTTP 8083 -> 8080\ngRPC 9090"]
+
+    N1 <-->|"gRPC Get/Set/Delete/Replicate/Health/Sync"| N2
+    N2 <-->|"gRPC Get/Set/Delete/Replicate/Health/Sync"| N3
+    N3 <-->|"gRPC Get/Set/Delete/Replicate/Health/Sync"| N1
+
+    N1 --> Ring["Consistent hash ring\n100 virtual nodes per node"]
+    N2 --> Ring
+    N3 --> Ring
+
+    N1 --> Prometheus["Prometheus scrape /metrics"]
+    N2 --> Prometheus
+    N3 --> Prometheus
+
+    N1 --> Dashboard["Admin dashboard\n/admin"]

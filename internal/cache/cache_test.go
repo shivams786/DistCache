@@ -70,3 +70,81 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestExistsAndClear(t *testing.T) {
+	c := New(Config{MaxEntries: 10, CleanupInterval: time.Hour})
+	c.Set("exists", []byte("yes"), time.Minute)
+	if !c.Exists("exists") {
+		t.Fatal("expected key to exist")
+	}
+	c.Clear()
+	if c.Size() != 0 || c.Exists("exists") {
+		t.Fatalf("expected clear to remove all entries, size=%d", c.Size())
+	}
+}
+
+func TestCleanupExpiredRemovesOnlyExpiredEntries(t *testing.T) {
+	c := New(Config{MaxEntries: 10, CleanupInterval: time.Hour})
+	c.Set("expired", []byte("gone"), 10*time.Millisecond)
+	c.Set("live", []byte("stay"), time.Minute)
+	time.Sleep(20 * time.Millisecond)
+
+	removed := c.CleanupExpired()
+	if removed != 1 {
+		t.Fatalf("expected one expired entry removed, got %d", removed)
+	}
+	if _, ok := c.Get("live"); !ok {
+		t.Fatal("live key should remain")
+	}
+}
+
+func TestSnapshotClonesValues(t *testing.T) {
+	c := New(Config{MaxEntries: 10, CleanupInterval: time.Hour})
+	c.Set("clone", []byte("before"), time.Minute)
+	snapshot := c.Snapshot()
+	if len(snapshot) != 1 {
+		t.Fatalf("expected one snapshot entry, got %d", len(snapshot))
+	}
+	snapshot[0].Value[0] = 'x'
+	entry, ok := c.Get("clone")
+	if !ok || string(entry.Value) != "before" {
+		t.Fatalf("cache value mutated through snapshot: ok=%v value=%q", ok, entry.Value)
+	}
+}
+
+func TestExpiredEntriesRemovedBeforeLRUEviction(t *testing.T) {
+	c := New(Config{MaxEntries: 2, CleanupInterval: time.Hour})
+	c.Set("expired", []byte("gone"), 10*time.Millisecond)
+	c.Set("live", []byte("stay"), time.Minute)
+	time.Sleep(20 * time.Millisecond)
+	c.Set("new", []byte("fresh"), time.Minute)
+
+	if c.Exists("expired") {
+		t.Fatal("expired key should be removed")
+	}
+	if !c.Exists("live") || !c.Exists("new") {
+		t.Fatal("live and new keys should remain")
+	}
+}
+
+func TestConcurrentSnapshotAndDelete(t *testing.T) {
+	c := New(Config{MaxEntries: 1000, CleanupInterval: time.Hour})
+	for i := 0; i < 500; i++ {
+		c.Set(fmt.Sprintf("key-%d", i), []byte("value"), time.Minute)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				key := fmt.Sprintf("key-%d", (id+j)%500)
+				c.Snapshot()
+				c.Delete(key)
+				c.Set(key, []byte("value"), time.Minute)
+			}
+		}(i)
+	}
+	wg.Wait()
+}

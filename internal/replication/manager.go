@@ -57,7 +57,7 @@ func NewWithRetries(client Client, workers int, queueSize int, timeout time.Dura
 	if timeout <= 0 {
 		timeout = 750 * time.Millisecond
 	}
-	if retries < 0 {
+	if retries <= 0 {
 		retries = 3
 	}
 	return &Manager{
