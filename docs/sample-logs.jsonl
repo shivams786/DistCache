@@ -1,8 +1,8 @@
-{"time":"2026-07-16T10:30:00Z","level":"INFO","msg":"http server started","node_id":"cache-node-1","event":"node_startup","http_addr":":8080"}
-{"time":"2026-07-16T10:30:00Z","level":"INFO","msg":"grpc server started","node_id":"cache-node-1","event":"node_startup","grpc_addr":":9090"}
-{"time":"2026-07-16T10:30:03Z","level":"INFO","msg":"cache set","node_id":"cache-node-1","event":"cache_set","key_hash":"a19fd3c0b2e1a9ab","primary_node":"cache-node-1","replication_queued":true}
-{"time":"2026-07-16T10:30:03Z","level":"INFO","msg":"replica stored key","node_id":"cache-node-2","event":"cache_replicated","key_hash":"a19fd3c0b2e1a9ab","source_node":"cache-node-1"}
-{"time":"2026-07-16T10:31:12Z","level":"WARN","msg":"node marked unhealthy","node_id":"cache-node-1","event":"node_unhealthy","node":"cache-node-2","healthy":false}
-{"time":"2026-07-16T10:31:13Z","level":"WARN","msg":"failover routing","node_id":"cache-node-1","event":"failover","key_hash":"a19fd3c0b2e1a9ab","primary_node":"cache-node-2","fallback_node":"cache-node-3"}
-{"time":"2026-07-16T10:31:25Z","level":"INFO","msg":"node recovered","node_id":"cache-node-1","event":"node_recovery","node":"cache-node-2","healthy":true}
-{"time":"2026-07-16T10:31:27Z","level":"INFO","msg":"node synchronization completed","node_id":"cache-node-1","event":"sync_completed","target":"cache-node-2","entries":250}
+{"time":"2026-07-16T10:30:00Z","level":"INFO","msg":"http server started","node_id":"cache-node-1","event":"node_started","http_addr":":8080"}
+{"time":"2026-07-16T10:30:00Z","level":"INFO","msg":"grpc server started","node_id":"cache-node-1","event":"node_started","grpc_addr":":9090"}
+{"time":"2026-07-16T10:30:03Z","level":"INFO","msg":"cache set","node_id":"cache-node-1","event":"entry_stored","key_hash":"a19fd3c0b2e1a9ab","primary_node":"cache-node-1","replication_queued":true}
+{"time":"2026-07-16T10:30:03Z","level":"INFO","msg":"replica stored key","node_id":"cache-node-2","event":"entry_replicated","key_hash":"a19fd3c0b2e1a9ab","source_node":"cache-node-1"}
+{"time":"2026-07-16T10:31:12Z","level":"WARN","msg":"node marked unhealthy","node_id":"cache-node-1","event":"peer_state_changed","node":"cache-node-2","state":"unhealthy"}
+{"time":"2026-07-16T10:31:13Z","level":"WARN","msg":"failover routing","node_id":"cache-node-1","event":"failover_routed","key_hash":"a19fd3c0b2e1a9ab","primary_node":"cache-node-2","fallback_node":"cache-node-3"}
+{"time":"2026-07-16T10:31:25Z","level":"INFO","msg":"node recovered","node_id":"cache-node-1","event":"peer_state_changed","node":"cache-node-2","state":"healthy"}
+{"time":"2026-07-16T10:31:27Z","level":"INFO","msg":"node synchronization completed","node_id":"cache-node-1","event":"recovery_completed","target":"cache-node-2","entries":250}

@@ -1,5 +1,5 @@
 flowchart LR
-    Client["HTTP clients"] --> N1["cache-node-1\nHTTP 8081 -> 8080\ngRPC 9090"]
+    Client["HTTP client"] --> N1["cache-node-1\nHTTP 8081 -> 8080\ngRPC 9090"]
     Client --> N2["cache-node-2\nHTTP 8082 -> 8080\ngRPC 9090"]
     Client --> N3["cache-node-3\nHTTP 8083 -> 8080\ngRPC 9090"]
 
@@ -15,4 +15,4 @@ flowchart LR
     N2 --> Prometheus
     N3 --> Prometheus
 
-    N1 --> Dashboard["Admin dashboard\n/admin"]
+    N1 --> Dashboard["Dashboard\n/admin"]

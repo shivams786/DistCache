@@ -183,18 +183,18 @@ func (a *App) Run(ctx context.Context) error {
 
 	errCh := make(chan error, 2)
 	go func() {
-		a.logger.Info("grpc server started", "event", "node_startup", "grpc_addr", a.cfg.GRPCAddr)
+		a.logger.Info("grpc server started", "event", "node_started", "grpc_addr", a.cfg.GRPCAddr)
 		if err := a.grpcServer.Serve(grpcListener); err != nil {
 			errCh <- err
 		}
 	}()
 	go func() {
-		a.logger.Info("http server started", "event", "node_startup", "http_addr", a.cfg.HTTPAddr)
+		a.logger.Info("http server started", "event", "node_started", "http_addr", a.cfg.HTTPAddr)
 		if err := a.httpServer.Serve(httpListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 	}()
-	a.events.Add("info", "node_startup", "node started", map[string]string{"node": a.cfg.NodeID})
+	a.events.Add("info", "node_started", "node started", map[string]string{"node": a.cfg.NodeID})
 
 	select {
 	case <-ctx.Done():
@@ -208,7 +208,7 @@ func (a *App) Run(ctx context.Context) error {
 
 func (a *App) shutdown() {
 	a.once.Do(func() {
-		a.logger.Info("node shutting down", "event", "node_shutdown")
+		a.logger.Info("node shutting down", "event", "node_stopped")
 		ctx, cancel := context.WithTimeout(context.Background(), a.cfg.GracefulShutdownTimeout)
 		defer cancel()
 		if a.httpServer != nil {
@@ -264,7 +264,7 @@ func (a *App) handleCache(w http.ResponseWriter, r *http.Request) {
 	key, err := cacheKey(r.URL.Path)
 	if err != nil {
 		status = "bad_request"
-		writeError(w, http.StatusBadRequest, err)
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return
 	}
 
@@ -288,18 +288,18 @@ func (a *App) handleSet(w http.ResponseWriter, r *http.Request, key string, stat
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		*status = "bad_request"
-		writeError(w, http.StatusBadRequest, err)
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "Request body must be valid JSON.")
 		return
 	}
 	if len(payload.Value) == 0 {
 		*status = "bad_request"
-		writeError(w, http.StatusBadRequest, errors.New("value is required"))
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "value is required")
 		return
 	}
 	value := decodeValue(payload.Value)
 	if len(value) > a.cfg.MaxValueBytes {
 		*status = "payload_too_large"
-		writeError(w, http.StatusRequestEntityTooLarge, fmt.Errorf("value exceeds maximum size of %d bytes", a.cfg.MaxValueBytes))
+		writeError(w, http.StatusRequestEntityTooLarge, "VALUE_TOO_LARGE", fmt.Sprintf("value must be %d bytes or smaller", a.cfg.MaxValueBytes))
 		return
 	}
 	expiresAt := time.Time{}
@@ -351,7 +351,8 @@ func (a *App) handleSet(w http.ResponseWriter, r *http.Request, key string, stat
 			}
 		}
 		*status = "bad_gateway"
-		writeError(w, http.StatusBadGateway, err)
+		a.logger.Warn("forwarded set failed", "event", "request_forward_failed", "target", owner, "key_hash", cache.KeyHash(key), "error", err)
+		writeError(w, http.StatusBadGateway, "NODE_UNAVAILABLE", "The key owner is currently unavailable.")
 		return
 	}
 	resp.PrimaryNode = owner
@@ -422,7 +423,8 @@ func (a *App) handleDelete(w http.ResponseWriter, r *http.Request, key string, s
 			}
 		}
 		*status = "bad_gateway"
-		writeError(w, http.StatusBadGateway, err)
+		a.logger.Warn("forwarded delete failed", "event", "request_forward_failed", "target", owner, "key_hash", cache.KeyHash(key), "error", err)
+		writeError(w, http.StatusBadGateway, "NODE_UNAVAILABLE", "The key owner is currently unavailable.")
 		return
 	}
 	resp.PrimaryNode = owner
@@ -432,10 +434,10 @@ func (a *App) handleDelete(w http.ResponseWriter, r *http.Request, key string, s
 func (a *App) localGet(key string) *transport.GetResponse {
 	entry, found := a.cache.Get(key)
 	if !found {
-		a.logger.Info("cache miss", "event", "cache_miss", "key_hash", cache.KeyHash(key))
+		a.logger.Debug("cache miss", "event", "cache_miss", "key_hash", cache.KeyHash(key))
 		return &transport.GetResponse{Key: key, Found: false, ServedBy: a.cfg.NodeID}
 	}
-	a.logger.Info("cache hit", "event", "cache_hit", "key_hash", cache.KeyHash(key))
+	a.logger.Debug("cache hit", "event", "cache_hit", "key_hash", cache.KeyHash(key))
 	return &transport.GetResponse{
 		Key:               key,
 		Value:             entry.Value,
@@ -461,12 +463,12 @@ func (a *App) applySet(key string, value []byte, expiresAt time.Time, primary st
 		}
 	}
 	a.logger.Info("cache set",
-		"event", "cache_set",
+		"event", "entry_stored",
 		"key_hash", cache.KeyHash(key),
 		"primary_node", primary,
 		"replication_queued", repQueued,
 	)
-	a.events.Add("info", "cache_set", "key stored", map[string]string{"key_hash": cache.KeyHash(key), "primary": primary})
+	a.events.Add("info", "entry_stored", "key stored", map[string]string{"key_hash": cache.KeyHash(key), "primary": primary})
 	return &transport.SetResponse{Key: key, Stored: true, PrimaryNode: primary, ReplicationQueued: repQueued}
 }
 
@@ -484,25 +486,25 @@ func (a *App) applyDelete(key string, primary string, skipReplication bool) *tra
 		}
 	}
 	a.logger.Info("cache delete",
-		"event", "cache_delete",
+		"event", "entry_deleted",
 		"key_hash", cache.KeyHash(key),
 		"primary_node", primary,
 		"deleted", deleted,
 		"replication_queued", repQueued,
 	)
-	a.events.Add("info", "cache_delete", "key deleted", map[string]string{"key_hash": cache.KeyHash(key), "primary": primary})
+	a.events.Add("info", "entry_deleted", "key deleted", map[string]string{"key_hash": cache.KeyHash(key), "primary": primary})
 	return &transport.DeleteResponse{Key: key, Deleted: deleted, PrimaryNode: primary, ReplicationQueued: repQueued}
 }
 
 func (a *App) recordFailover(key, primary, owner string) {
 	a.metrics.IncFailover()
 	a.logger.Warn("failover routing",
-		"event", "failover",
+		"event", "failover_routed",
 		"key_hash", cache.KeyHash(key),
 		"primary_node", primary,
 		"fallback_node", owner,
 	)
-	a.events.Add("warn", "failover", "request routed to healthy fallback", map[string]string{
+	a.events.Add("warn", "failover_routed", "request routed to healthy fallback", map[string]string{
 		"key_hash": cache.KeyHash(key),
 		"primary":  primary,
 		"fallback": owner,
@@ -632,16 +634,16 @@ func (a *App) checkPeers(ctx context.Context) {
 		if changed {
 			level := "warn"
 			logLevel := slog.LevelWarn
-			event := "node_unhealthy"
+			state := "unhealthy"
 			message := "node marked unhealthy"
 			if healthy {
 				level = "info"
 				logLevel = slog.LevelInfo
-				event = "node_recovery"
+				state = "healthy"
 				message = "node recovered"
 			}
-			a.logger.Log(ctx, logLevel, message, "event", event, "node", node.ID, "healthy", healthy)
-			a.events.Add(level, event, message, map[string]string{"node": node.ID})
+			a.logger.Log(ctx, logLevel, message, "event", "peer_state_changed", "node", node.ID, "state", state)
+			a.events.Add(level, "peer_state_changed", message, map[string]string{"node": node.ID, "state": state})
 			if healthy {
 				go a.recoverNode(context.Background(), node.ID)
 			}
@@ -654,8 +656,8 @@ func (a *App) recoverNode(ctx context.Context, nodeID string) {
 	case a.recoverySem <- struct{}{}:
 		defer func() { <-a.recoverySem }()
 	default:
-		a.logger.Warn("recovery skipped because limit is reached", "event", "recovery_limit_reached", "target", nodeID)
-		a.events.Add("warn", "recovery_limit_reached", "maximum concurrent recovery operations reached", map[string]string{"target": nodeID})
+		a.logger.Warn("recovery skipped because limit is reached", "event", "recovery_skipped", "target", nodeID)
+		a.events.Add("warn", "recovery_skipped", "maximum concurrent recovery operations reached", map[string]string{"target": nodeID})
 		return
 	}
 
@@ -668,8 +670,8 @@ func (a *App) recoverNode(ctx context.Context, nodeID string) {
 	for _, entry := range entries {
 		select {
 		case <-recoveryCtx.Done():
-			a.logger.Warn("node synchronization timed out", "event", "sync_timeout", "target", nodeID, "entries", copied)
-			a.events.Add("warn", "sync_timeout", "node synchronization timed out", map[string]string{
+			a.logger.Warn("node synchronization timed out", "event", "recovery_timed_out", "target", nodeID, "entries", copied)
+			a.events.Add("warn", "recovery_timed_out", "node synchronization timed out", map[string]string{
 				"target":  nodeID,
 				"entries": fmt.Sprint(copied),
 			})
@@ -693,8 +695,8 @@ func (a *App) recoverNode(ctx context.Context, nodeID string) {
 			time.Sleep(0)
 		}
 	}
-	a.logger.Info("node synchronization completed", "event", "sync_completed", "target", nodeID, "entries", copied)
-	a.events.Add("info", "sync_completed", "node synchronization completed", map[string]string{
+	a.logger.Info("node synchronization completed", "event", "recovery_completed", "target", nodeID, "entries", copied)
+	a.events.Add("info", "recovery_completed", "node synchronization completed", map[string]string{
 		"target":  nodeID,
 		"entries": fmt.Sprint(copied),
 	})
@@ -736,11 +738,11 @@ func (a *App) Replicate(_ context.Context, req *transport.ReplicateRequest) (*tr
 	}
 	a.cache.SetWithExpiration(req.Key, req.Value, timeFromUnix(req.ExpiresAtUnixNano))
 	a.logger.Info("replica stored key",
-		"event", "cache_replicated",
+		"event", "entry_replicated",
 		"key_hash", cache.KeyHash(req.Key),
 		"source_node", req.SourceNode,
 	)
-	a.events.Add("info", "cache_replicated", "replica stored key", map[string]string{
+	a.events.Add("info", "entry_replicated", "replica stored key", map[string]string{
 		"key_hash": cache.KeyHash(req.Key),
 		"source":   req.SourceNode,
 	})
@@ -832,6 +834,11 @@ func writeGetJSON(w http.ResponseWriter, resp *transport.GetResponse) {
 	writeJSON(w, http.StatusOK, payload)
 }
 
-func writeError(w http.ResponseWriter, status int, err error) {
-	writeJSON(w, status, map[string]any{"error": err.Error()})
+func writeError(w http.ResponseWriter, status int, code string, message string) {
+	writeJSON(w, status, map[string]any{
+		"error": map[string]string{
+			"code":    code,
+			"message": message,
+		},
+	})
 }

@@ -1,4 +1,4 @@
-.PHONY: build run test test-unit test-integration test-race lint coverage proto docker-up docker-down resilience-test load-test
+.PHONY: build run test test-unit test-integration test-race lint coverage verify proto docker-up docker-down resilience-test load-test
 
 build:
 	go build ./cmd/server
@@ -24,6 +24,8 @@ lint:
 coverage:
 	go test -coverprofile=coverage.out ./internal/cache ./internal/hash ./internal/cluster ./internal/replication ./internal/app
 	go tool cover -func=coverage.out
+
+verify: test test-race lint coverage
 
 proto:
 	@echo "proto/cache.proto documents the gRPC API; transport is implemented with a JSON gRPC codec for a compact portfolio build."

@@ -215,7 +215,7 @@ func (c *Cache) removeExpiredLocked(now time.Time) int {
 			c.lru.Remove(elem)
 			c.expired++
 			removed++
-			c.log("cache_expired", entry.Key, "ttl")
+			c.log("entry_expired", entry.Key, "ttl")
 		}
 	}
 	return removed
@@ -236,10 +236,10 @@ func (c *Cache) removeElementLocked(elem *list.Element, reason string) {
 	switch reason {
 	case "capacity":
 		c.evictions++
-		c.log("cache_eviction", entry.Key, reason)
+		c.log("entry_evicted", entry.Key, reason)
 	case "expired":
 		c.expired++
-		c.log("cache_expired", entry.Key, reason)
+		c.log("entry_expired", entry.Key, reason)
 	}
 }
 

@@ -50,10 +50,10 @@ const html = `<!doctype html>
     <section class="stats">
       <div class="stat"><div class="label">Healthy Nodes</div><div id="healthyNodes" class="value">0/0</div></div>
       <div class="stat"><div class="label">Entries</div><div id="entries" class="value">0</div></div>
-      <div class="stat"><div class="label">Hit Ratio</div><div id="hitRatio" class="value">0%</div></div>
+      <div class="stat"><div class="label">Hit Ratio</div><div id="hitRatio" class="value">No requests yet</div></div>
       <div class="stat"><div class="label">Requests</div><div id="requests" class="value">0</div></div>
       <div class="stat"><div class="label">Evictions</div><div id="evictions" class="value">0</div></div>
-      <div class="stat"><div class="label">Failures</div><div id="failures" class="value">0</div></div>
+      <div class="stat"><div class="label">Replication / Failover</div><div id="failures" class="value">0</div></div>
     </section>
     <section class="panel">
       <h2>Cluster Nodes</h2>
@@ -76,7 +76,7 @@ const html = `<!doctype html>
     }
     function pct(hits, misses) {
       const total = hits + misses;
-      return total === 0 ? "0%" : Math.round((hits / total) * 100) + "%";
+      return total === 0 ? "No requests yet" : Math.round((hits / total) * 100) + "%";
     }
     async function refresh() {
       const [cluster, stats, events] = await Promise.all([
