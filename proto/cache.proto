@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+package distcache;
+
+option go_package = "github.com/codex/distcache/proto;proto";
+
+service CacheNode {
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc Set(SetRequest) returns (SetResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc Replicate(ReplicateRequest) returns (ReplicateResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc Sync(SyncRequest) returns (stream SyncEntry);
+}
+
+message GetRequest {
+  string key = 1;
+  string origin_node = 2;
+  int32 hop_count = 3;
+}
+
+message GetResponse {
+  string key = 1;
+  bytes value = 2;
+  bool found = 3;
+  string served_by = 4;
+  int64 expires_at_unix_nano = 5;
+}
+
+message SetRequest {
+  string key = 1;
+  bytes value = 2;
+  int64 ttl_seconds = 3;
+  int64 expires_at_unix_nano = 4;
+  string origin_node = 5;
+  int32 hop_count = 6;
+  bool skip_replication = 7;
+}
+
+message SetResponse {
+  string key = 1;
+  bool stored = 2;
+  string primary_node = 3;
+  bool replication_queued = 4;
+}
+
+message DeleteRequest {
+  string key = 1;
+  string origin_node = 2;
+  int32 hop_count = 3;
+  bool skip_replication = 4;
+}
+
+message DeleteResponse {
+  string key = 1;
+  bool deleted = 2;
+  string primary_node = 3;
+  bool replication_queued = 4;
+}
+
+message ReplicateRequest {
+  string key = 1;
+  bytes value = 2;
+  int64 expires_at_unix_nano = 3;
+  string source_node = 4;
+}
+
+message ReplicateResponse {
+  string key = 1;
+  bool stored = 2;
+  string node_id = 3;
+}
+
+message HealthRequest {
+  string requester_node = 1;
+}
+
+message HealthResponse {
+  string node_id = 1;
+  bool healthy = 2;
+  int64 cache_entries = 3;
+  uint64 request_count = 4;
+  int64 time_unix_nano = 5;
+}
+
+message SyncRequest {
+  string requester_node = 1;
+}
+
+message SyncEntry {
+  string key = 1;
+  bytes value = 2;
+  int64 expires_at_unix_nano = 3;
+}

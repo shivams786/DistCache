@@ -1,0 +1,52 @@
+services:
+  cache-node-1:
+    build: .
+    environment:
+      NODE_ID: cache-node-1
+      HTTP_PORT: 8080
+      GRPC_PORT: 9090
+      CLUSTER_NODES: cache-node-1:9090,cache-node-2:9090,cache-node-3:9090
+      CACHE_MAX_ENTRIES: 10000
+      REPLICATION_FACTOR: 2
+      VIRTUAL_NODES: 100
+    ports:
+      - "8081:8080"
+
+  cache-node-2:
+    build: .
+    environment:
+      NODE_ID: cache-node-2
+      HTTP_PORT: 8080
+      GRPC_PORT: 9090
+      CLUSTER_NODES: cache-node-1:9090,cache-node-2:9090,cache-node-3:9090
+      CACHE_MAX_ENTRIES: 10000
+      REPLICATION_FACTOR: 2
+      VIRTUAL_NODES: 100
+    ports:
+      - "8082:8080"
+
+  cache-node-3:
+    build: .
+    environment:
+      NODE_ID: cache-node-3
+      HTTP_PORT: 8080
+      GRPC_PORT: 9090
+      CLUSTER_NODES: cache-node-1:9090,cache-node-2:9090,cache-node-3:9090
+      CACHE_MAX_ENTRIES: 10000
+      REPLICATION_FACTOR: 2
+      VIRTUAL_NODES: 100
+    ports:
+      - "8083:8080"
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./deployments/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9095:9090"
+    depends_on:
+      - cache-node-1
+      - cache-node-2
+      - cache-node-3
